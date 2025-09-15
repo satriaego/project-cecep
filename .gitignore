@@ -1,0 +1,14 @@
+# Folder build/output
+node_modules/
+waSistem/auth_info_baileys/
+acs712
+pzem nyusahin tes
+# File konfigurasi lokal
+*.env
+*.log
+*.tmp
+
+# File editor
+.vscode/
+*.code-workspace
+
