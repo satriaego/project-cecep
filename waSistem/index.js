@@ -1,5 +1,12 @@
 import QRCode from "qrcode";
-import { DisconnectReason, makeWASocket, useMultiFileAuthState } from "baileys";
+import pino from "pino";
+import { Boom } from "@hapi/boom";
+import {
+  DisconnectReason,
+  makeWASocket,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+} from "@whiskeysockets/baileys";
 import mqtt from "mqtt";
 let sock;
 let systemStatus = {
@@ -125,7 +132,7 @@ function connectMQTT() {
       limitDecimals(mqttData);
       // console.log(mqttData.current.value);
       // console.log(relayStatus.relay1);
-      
+
       if (mqttData.current.value <= 0 && relayStatus.relay1 === "1") {
         const warningMessage = "⚠️ *BAHAYA!* \n Ada yang salah!";
         const targetJid = "6285708210771@s.whatsapp.net"; // nomor tujuan
@@ -133,7 +140,6 @@ function connectMQTT() {
           sock.sendMessage(targetJid, { text: warningMessage });
         }
       }
-    
     } catch (error) {
       console.error("[MQTT] Error parsing message:", error);
     }
@@ -171,16 +177,25 @@ let mqttClient = connectMQTT();
 
 async function startsock() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
-  sock = makeWASocket({ auth: state });
+
+  const { version } = await fetchLatestBaileysVersion();
+  sock = makeWASocket({
+    version,
+    auth: state,
+    logger: pino({ level: "debug" }), // pakai "debug" sementara untuk lihat error
+  });
+
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       console.log(await QRCode.toString(qr, { type: "terminal", small: true }));
     }
+
     if (
       connection === "close" &&
-      lastDisconnect?.error?.output?.statusCode ===
-        DisconnectReason.restartRequired
+      (lastDisconnect?.error instanceof Boom
+        ? lastDisconnect?.error?.output?.statusCode
+        : 0) !== DisconnectReason.loggedOut
     ) {
       startsock();
     }
@@ -253,7 +268,7 @@ async function startsock() {
       if (systemStatus.mode === "otomatis") {
         newMode = "manual";
       } else if (systemStatus.mode === "manual") {
-        newMode = "auto"; 
+        newMode = "auto";
       } else {
         newMode = "manual";
       }
@@ -262,7 +277,6 @@ async function startsock() {
       mqttClient.publish("cecep/ta/mode", newMode);
       await addReact(jid, key, newMode === "manual" ? "🤖" : "🧠");
       await sendMessageWithContext(jid, `Mode dirubah ke ${newMode}`, context);
-
     } else if (msgText.toLowerCase() === "rp") {
       let { dateString, timeString } = getFormattedDateTime();
       const keyDescriptions = {
@@ -277,7 +291,7 @@ async function startsock() {
 
       let reportSections = {
         Environmental: ["tempC", "lux"],
-        Electrical: ["pltV", "pltI", "load","current", "batteryV"],
+        Electrical: ["pltV", "pltI", "load", "current", "batteryV"],
       };
 
       let reportLines = [
@@ -295,7 +309,7 @@ async function startsock() {
         keys.forEach((key) => {
           if (mqttData[key]) {
             sectionLines.push(
-              `> ${keyDescriptions[key]}: ${mqttData[key].value} ${mqttData[key].suffix}`
+              `> ${keyDescriptions[key]}: ${mqttData[key].value} ${mqttData[key].suffix}`,
             );
           }
         });
@@ -316,15 +330,15 @@ async function startsock() {
       await addReact(jid, key, "⚡"); // Add reaction
       await sendMessageWithContext(jid, statusMessage, context);
     } else {
-    // Jika tidak ada command yang cocok, kirim list command
-      const commandList = 
+      // Jika tidak ada command yang cocok, kirim list command
+      const commandList =
         `*📋 Daftar Command:*\n` +
         `\n *ld*   - Nyalakan/Mematikan Beban` +
         `\n *md* - Ganti Mode Manual/Otomatis` +
         `\n *rp*   - Laporan Data Sensor` +
-        `\n *li*     - Status Beban\n`+
+        `\n *li*     - Status Beban\n` +
         `\n *catatan* : perintah *ld* hanya bisa digunakan saat mode manual\n`;
-        
+
       await addReact(jid, key, "⁉️");
       await sendMessageWithContext(jid, commandList, context);
     }
